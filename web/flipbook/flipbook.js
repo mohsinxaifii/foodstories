@@ -1030,7 +1030,7 @@
   // for automated checks
   window.__flipbook = {
     next, prev, goToPage,
-    state: () => ({ pos, side, portrait, pixelRatio, lowEnd: LOW_END, hiSet: hiSet[0], canvas: [canvas.width, canvas.height, canvas.clientWidth], maps: sheets.filter((s) => s.front.visible).map((s) => [s.i, s.front.material.map.image && s.front.material.map.image.naturalWidth, s.back.material.map.image && s.back.material.map.image.naturalWidth]), cache: [...cache.keys()].length, pendingUploads: uploads.length, t: sheets.map((s) => +progress(s).toFixed(3)) }),
+    state: () => ({ pos, side, portrait, pixelRatio, lowEnd: LOW_END, t: sheets.map((s) => +progress(s).toFixed(3)) }),
     pose: (i, c) => { const sh = sheets[i]; sh.drag = true; sh.p0 = { ...DEFAULT_GRAB }; sh.c = sh.dragTo = constrain(sh, c); },
   };
 })();
