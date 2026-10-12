@@ -23,7 +23,7 @@ from io import BytesIO
 from pathlib import Path
 
 import pymupdf
-from PIL import Image
+from PIL import Image, ImageFilter
 
 ROOT = Path(__file__).resolve().parent.parent
 PAGES_DIR = ROOT / "magazine" / "pages"
@@ -53,10 +53,13 @@ def jpeg_bytes(path, max_px, quality):
         return buf.getvalue(), im.size, True
 
 
-def save_small(path, out, px, quality=82):
+def save_small(path, out, px, quality=82, sharpen=False):
     with Image.open(path) as im:
         im = im.convert("RGB")
         im.thumbnail((px, px), Image.LANCZOS)
+        if sharpen:
+            # shrinking softens small type; restore its edge contrast
+            im = im.filter(ImageFilter.UnsharpMask(radius=0.8, percent=70, threshold=2))
         out.parent.mkdir(parents=True, exist_ok=True)
         im.save(out, "JPEG", quality=quality, optimize=True, progressive=True)
 
@@ -124,8 +127,8 @@ def main():
         page.insert_image(page.rect, stream=data)
         thumb = f"page-{i:02d}.jpg"
         save_small(path, args.out / "thumbs" / thumb, 600)
-        save_small(path, flip_dir / "pages" / thumb, args.flip_px, 84)
-        save_small(path, flip_dir / "pages-sm" / thumb, 1024, 84)
+        save_small(path, flip_dir / "pages" / thumb, args.flip_px, 88, sharpen=True)
+        save_small(path, flip_dir / "pages-sm" / thumb, 1024, 88, sharpen=True)
         shutil.copyfile(args.out / "thumbs" / thumb, flip_dir / "pages-xs" / thumb)
         (flip_dir / "pages-hd" / thumb).write_bytes(data)
         manifest_pages.append({"page": i, "source": path.name, "thumb": f"thumbs/{thumb}", "width": w, "height": h})

@@ -67,10 +67,19 @@
     loader.innerHTML = 'This browser can’t show the 3D magazine. <a href="pages-hd/page-01.jpg">Open the pages</a>';
     return;
   }
+  // Full sharpness whenever the book is still. Only while pages are moving may the resolution
+  // drop (adaptively, and only if the device needs it), where motion hides it.
   const PR_MAX = Math.min(window.devicePixelRatio || 1, 2);
   const PR_MIN = Math.min(PR_MAX, 0.75);
-  let pixelRatio = LOW_END ? Math.min(PR_MAX, 1.5) : PR_MAX;
+  let motionRatio = LOW_END ? Math.min(PR_MAX, 1.5) : PR_MAX;
+  let pixelRatio = PR_MAX;
   renderer.setPixelRatio(pixelRatio);
+  function useRatio(r) {
+    if (r === pixelRatio) return;
+    pixelRatio = r;
+    renderer.setPixelRatio(r);
+    renderer.setSize(host.clientWidth, host.clientHeight, false);
+  }
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.PCFShadowMap; // filtered (radius) for soft edges
@@ -149,14 +158,11 @@
   contact.position.z = -0.0008;
   book.add(contact);
 
-  // page edges of the book block
-  const edgeSideMat = new THREE.MeshStandardMaterial({ map: edgeTexture(true), roughness: 0.95 });
-  const edgeBottomMat = new THREE.MeshStandardMaterial({ map: edgeTexture(false), roughness: 0.95 });
+  // page edges of the book block, along the outer sides
+  const edgeSideMat = new THREE.MeshStandardMaterial({ map: edgeTexture(), roughness: 0.95 });
   const blocks = {
     rightSide: edgeBox(edgeSideMat, 0.003, H, W + 0.0015, 0),
-    rightBottom: edgeBox(edgeBottomMat, W, 0.003, W / 2, -H / 2 - 0.0015),
     leftSide: edgeBox(edgeSideMat, 0.003, H, -W - 0.0015, 0),
-    leftBottom: edgeBox(edgeBottomMat, W, 0.003, -W / 2, -H / 2 - 0.0015),
   };
 
   function edgeBox(mat, sx, sy, x, y) {
@@ -169,12 +175,12 @@
     return m;
   }
 
-  function edgeTexture(vertical) {
+  function edgeTexture() {
     const c = document.createElement('canvas');
     c.width = c.height = 64;
     const g = c.getContext('2d');
     // paper edges: light at the top of the block, slightly shaded toward the table
-    const grad = vertical ? g.createLinearGradient(64, 0, 0, 0) : g.createLinearGradient(0, 0, 0, 64);
+    const grad = g.createLinearGradient(64, 0, 0, 0);
     grad.addColorStop(0, '#f4efe6');
     grad.addColorStop(1, '#d9d0c2');
     g.fillStyle = grad;
@@ -231,8 +237,10 @@
     if (!uploads.length) return;
     const now = performance.now();
     if (moving && now - lastUpload < 300) return;
-    // small stand-ins first: they're quick and they're what's missing
-    const k = uploads.findIndex((u) => !u.hi);
+    // what's on screen right now first (its sharp version, then its stand-in), then the rest
+    let k = uploads.findIndex((u) => u.hi && onScreen.has(u.url));
+    if (k < 0) k = uploads.findIndex((u) => onScreen.has(u.url));
+    if (k < 0) k = uploads.findIndex((u) => !u.hi);
     const { url, tex, hi } = uploads.splice(k < 0 ? 0 : k, 1)[0];
     renderer.initTexture(tex);
     cache.set(url, { tex, used: now, hi });
@@ -245,7 +253,7 @@
   function prune() {
     for (const hi of [true, false]) {
       const list = [...cache].filter(([, e]) => e.hi === hi).sort((a, b) => a[1].used - b[1].used);
-      const max = hi ? 12 : 40;
+      const max = hi ? 10 : 40;
       while (list.length > max) {
         const [url, e] = list.shift();
         e.tex.dispose();
@@ -254,8 +262,11 @@
     }
   }
 
+  const onScreen = new Set(); // urls the visible pages want, refreshed every frame
   function texFor(p) {
     if (p >= N) return paperTex;
+    onScreen.add(hiSet[p]);
+    onScreen.add(data.xs[p]);
     const now = performance.now();
     let e = cache.get(hiSet[p]);
     if (e) { e.used = now; return e.tex; }
@@ -313,8 +324,8 @@
   for (let i = 0; i < S; i++) {
     const geo = makeGeometry();
     const matOpts = { map: paperTex, vertexColors: true, roughness: PAPER_ROUGHNESS, metalness: 0, envMapIntensity: SHEEN };
-    const front = new THREE.Mesh(geo.front, new THREE.MeshStandardMaterial({ ...matOpts, side: THREE.FrontSide }));
-    const back = new THREE.Mesh(geo.back, new THREE.MeshStandardMaterial({ ...matOpts, side: THREE.BackSide }));
+    const front = new THREE.Mesh(geo.front, crispMaterial({ ...matOpts, side: THREE.FrontSide }));
+    const back = new THREE.Mesh(geo.back, crispMaterial({ ...matOpts, side: THREE.BackSide }));
     for (const m of [front, back]) {
       m.frustumCulled = false;
       m.receiveShadow = true;
@@ -332,6 +343,19 @@
       dragTo: { ...DEFAULT_GRAB }, dvx: 0, dvy: 0, // where the hand is pulling, and how fast the paper moves
       shaped: { cx: NaN, cy: NaN, px: NaN, py: NaN }, // the pose the mesh was last built for
     });
+  }
+
+  // The GPU's mip-maps (pre-shrunk copies of each page) are softer than the browser's own image
+  // scaling, which blurs small text. Biasing the lookup toward the more detailed copy keeps type crisp.
+  function crispMaterial(opts) {
+    const m = new THREE.MeshStandardMaterial(opts);
+    m.onBeforeCompile = (shader) => {
+      shader.fragmentShader = shader.fragmentShader.replace(
+        'vec4 sampledDiffuseColor = texture2D( map, vMapUv );',
+        'vec4 sampledDiffuseColor = texture2D( map, vMapUv, -0.65 );'
+      );
+    };
+    return m;
   }
 
   // How far a sheet is through its turn (0 = right, 1 = left).
@@ -648,8 +672,8 @@
     }
     dist = hi;
     // texture size to match how big a page is on screen
-    const pagePx = (H / (2 * dist * Math.tan((FOV * Math.PI) / 360))) * h * renderer.getPixelRatio();
-    hiSet = pagePx > 1500 && !LOW_END ? data.zoom : pagePx > 900 ? data.pages : data.sm;
+    const pagePx = (H / (2 * dist * Math.tan((FOV * Math.PI) / 360))) * h * PR_MAX;
+    hiSet = pagePx > 800 && !LOW_END ? data.zoom : pagePx > 500 ? data.pages : data.sm;
     if (portrait !== wasPortrait) {
       if (portrait) side = pos >= S ? 'L' : 'R';
       afterNav();
@@ -681,12 +705,13 @@
     camX += (camTarget - camX) * k;
     tilt.x += (tilt.tx - tilt.x) * Math.min(1, dt * 3);
     tilt.y += (tilt.ty - tilt.y) * Math.min(1, dt * 3);
-    const settling = Math.abs(shiftTarget - shift) > 1e-4 || Math.abs(camTarget - camX) > 1e-4 ||
-      Math.abs(tilt.tx - tilt.x) > 1e-3 || Math.abs(tilt.ty - tilt.y) > 1e-3;
+    const settling = Math.abs(shiftTarget - shift) > 1e-4 || Math.abs(camTarget - camX) > 1e-4;
+    if (Math.abs(tilt.tx - tilt.x) > 1e-3 || Math.abs(tilt.ty - tilt.y) > 1e-3) dirty = true;
     if (book.position.x !== shift) shadowsChanged = true;
     book.position.x = shift;
     placeCamera(camX, dist, tilt.x, tilt.y);
 
+    onScreen.clear();
     // only sheets that can be seen: those in the air and the top sheet on each side
     let topR = -1;
     let topL = -1;
@@ -712,7 +737,7 @@
     // the block of pages under the top sheet (kept just below it so the two never fight)
     const depthR = Math.max(0, (right - 0.6) * GAP);
     const depthL = Math.max(0, (left - 0.6) * GAP);
-    for (const [m, depth] of [[blocks.rightSide, depthR], [blocks.rightBottom, depthR], [blocks.leftSide, depthL], [blocks.leftBottom, depthL]]) {
+    for (const [m, depth] of [[blocks.rightSide, depthR], [blocks.leftSide, depthL]]) {
       m.visible = depth > GAP * 0.3;
       m.scale.z = Math.max(depth, 0.0001);
       m.position.z = depth / 2;
@@ -743,20 +768,20 @@
   function adaptResolution(frameMs) {
     avgMs += (Math.min(frameMs, 200) - avgMs) * 0.15; // smoothed, so one odd frame doesn't decide
     sampled++;
-    let next = pixelRatio;
-    if (sampled >= 6 && avgMs > 22 && pixelRatio > PR_MIN) next = Math.max(PR_MIN, pixelRatio - (avgMs > 45 ? 0.5 : 0.25));
-    else if (sampled >= 120 && avgMs < 14 && pixelRatio < PR_MAX) next = Math.min(PR_MAX, pixelRatio + 0.25);
-    if (next !== pixelRatio) {
-      pixelRatio = next;
-      renderer.setPixelRatio(pixelRatio);
-      renderer.setSize(host.clientWidth, host.clientHeight, false);
+    let next = motionRatio;
+    if (sampled >= 6 && avgMs > 22 && motionRatio > PR_MIN) next = Math.max(PR_MIN, motionRatio - (avgMs > 45 ? 0.5 : 0.25));
+    else if (sampled >= 120 && avgMs < 14 && motionRatio < PR_MAX) next = Math.min(PR_MAX, motionRatio + 0.25);
+    if (next !== motionRatio) {
+      motionRatio = next;
+      useRatio(motionRatio);
       sampled = 0; // let the new setting show its frame time before judging again
       avgMs = 16;
     }
   }
 
   let last = performance.now();
-  let wasRendering = false;
+  let settling = false;
+  let wasMoving = false;
   function frame(now) {
     const frameMs = now - last;
     // keep pace with real time even when a frame is late, so motion never drags
@@ -764,11 +789,15 @@
     last = now;
     const active = step(dt);
     uploadPending(active);
-    if (active || dirty) {
-      if (wasRendering && active) adaptResolution(frameMs);
-      dirty = render(dt) || cache.size === 0;
-      wasRendering = true;
-    } else wasRendering = false;
+    const moving = active || settling;
+    // when motion stops, draw once more at full sharpness
+    if (moving || dirty || wasMoving) {
+      useRatio(moving ? motionRatio : PR_MAX);
+      if (moving && wasMoving) adaptResolution(frameMs);
+      dirty = cache.size === 0;
+      settling = render(dt);
+    }
+    wasMoving = moving;
     requestAnimationFrame(frame);
   }
 
@@ -1001,7 +1030,7 @@
   // for automated checks
   window.__flipbook = {
     next, prev, goToPage,
-    state: () => ({ pos, side, portrait, pixelRatio, lowEnd: LOW_END, t: sheets.map((s) => +progress(s).toFixed(3)) }),
+    state: () => ({ pos, side, portrait, pixelRatio, lowEnd: LOW_END, hiSet: hiSet[0], canvas: [canvas.width, canvas.height, canvas.clientWidth], maps: sheets.filter((s) => s.front.visible).map((s) => [s.i, s.front.material.map.image && s.front.material.map.image.naturalWidth, s.back.material.map.image && s.back.material.map.image.naturalWidth]), cache: [...cache.keys()].length, pendingUploads: uploads.length, t: sheets.map((s) => +progress(s).toFixed(3)) }),
     pose: (i, c) => { const sh = sheets[i]; sh.drag = true; sh.p0 = { ...DEFAULT_GRAB }; sh.c = sh.dragTo = constrain(sh, c); },
   };
 })();
