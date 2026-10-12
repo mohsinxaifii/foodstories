@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Food Stories Magazine</title>
+  <meta name="description" content="Read the Food Stories magazine.">
+  <meta property="og:title" content="Food Stories Magazine">
+  <meta property="og:image" content="pages-sm/page-01.jpg">
+  <link rel="stylesheet" href="flipbook.css">
+</head>
+<body>
+  <main class="scene" id="scene">
+    <div class="loader" id="loader"><span></span>Loading magazine…</div>
+  </main>
+
+  <nav class="controls" aria-label="Magazine controls">
+    <button type="button" id="first" aria-label="First page">
+      <svg viewBox="0 0 24 24"><path d="M6 5v14M18 6l-7 6 7 6"/></svg>
+    </button>
+    <button type="button" id="prev" aria-label="Previous page">
+      <svg viewBox="0 0 24 24"><path d="M15 6l-6 6 6 6"/></svg>
+    </button>
+    <span class="counter" id="counter" aria-live="polite">Cover</span>
+    <button type="button" id="next" aria-label="Next page">
+      <svg viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg>
+    </button>
+    <button type="button" id="last" aria-label="Last page">
+      <svg viewBox="0 0 24 24"><path d="M18 5v14M6 6l7 6-7 6"/></svg>
+    </button>
+    <span class="sep"></span>
+    <button type="button" id="zoom" aria-label="Zoom in to read">
+      <svg viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="6"/><path d="M15 15l5 5M10.5 8v5M8 10.5h5"/></svg>
+    </button>
+    <button type="button" id="fullscreen" aria-label="Full screen">
+      <svg viewBox="0 0 24 24"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg>
+    </button>
+  </nav>
+
+  <div class="zoom" id="zoomView" hidden>
+    <button type="button" class="zoom-close" id="zoomClose" aria-label="Close zoom">
+      <svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg>
+    </button>
+    <div class="zoom-pages" id="zoomPages"></div>
+  </div>
+
+  <script src="pages.js"></script>
+  <script src="vendor/three.min.js"></script>
+  <script src="flipbook.js"></script>
+</body>
+</html>
